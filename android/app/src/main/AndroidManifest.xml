@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
     <!-- Foreground service: keeps the MQTT connection alive with the
-         screen off, replacing push notifications -- see
+         screen off, replacing push notifications. See
          docs/PI_CONTRACT.md. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />

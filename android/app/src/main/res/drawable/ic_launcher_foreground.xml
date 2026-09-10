@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Placeholder launcher glyph (a simple ear/listening icon) -- swap for
+<!-- Placeholder launcher glyph (a simple ear/listening icon). Swap for
      a real designed icon before sharing the app with family; this only
      exists so the build doesn't need a binary asset checked in. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"

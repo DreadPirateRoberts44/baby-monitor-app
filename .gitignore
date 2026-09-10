@@ -18,6 +18,7 @@ android/captures/
 android/gradlew
 android/gradlew.bat
 **/gradle-wrapper.jar
+android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
 
 # iOS (future)
 ios/Flutter/Flutter.framework

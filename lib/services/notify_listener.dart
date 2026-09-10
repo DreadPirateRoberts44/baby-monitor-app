@@ -35,16 +35,20 @@ class NotifyListener {
     _statusController.add(ConnectionStatus.connecting);
 
     final clientId = 'baby-monitor-app-${settings.deviceId.substring(0, 8)}';
-    final client = MqttServerClient(host, clientId)
-      ..port = settings.mqttPort
-      ..logging(on: false)
-      ..keepAlivePeriod = 30
-      ..autoReconnect = true
-      ..onConnected = () => _statusController.add(ConnectionStatus.connected)
-      ..onDisconnected = () =>
-          _statusController.add(ConnectionStatus.disconnected)
-      ..onAutoReconnect = () =>
-          _statusController.add(ConnectionStatus.connecting);
+    final client = MqttServerClient(host, clientId);
+    client.port = settings.mqttPort;
+    client.logging(on: false);
+    client.keepAlivePeriod = 30;
+    client.autoReconnect = true;
+    client.onConnected = () {
+      _statusController.add(ConnectionStatus.connected);
+    };
+    client.onDisconnected = () {
+      _statusController.add(ConnectionStatus.disconnected);
+    };
+    client.onAutoReconnect = () {
+      _statusController.add(ConnectionStatus.connecting);
+    };
     _client = client;
 
     final connMessage = MqttConnectMessage()
