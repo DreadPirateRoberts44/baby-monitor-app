@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder launcher glyph (a simple ear/listening icon) -- swap for
+     a real designed icon before sharing the app with family; this only
+     exists so the build doesn't need a binary asset checked in. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,24 C38,24 28,36 28,50 C28,60 33,66 38,71 C41,74 42,77 42,81 L42,84 L50,84 L50,80 C50,74 47,70 43,66 C39,62 36,57 36,50 C36,40 43,32 54,32 C65,32 72,40 72,50 C72,58 68,63 63,67 L69,73 C76,67 80,59 80,50 C80,36 70,24 54,24 Z" />
+</vector>

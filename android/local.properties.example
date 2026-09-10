@@ -1,0 +1,8 @@
+# Copy this to android/local.properties (gitignored) and fill in your
+# real paths -- Flutter's build tooling generates/updates this file
+# automatically the first time you run `flutter pub get` / `flutter run`
+# once the Flutter SDK is installed and on PATH.
+sdk.dir=C:\\Users\\YOUR_USER\\AppData\\Local\\Android\\sdk
+flutter.sdk=C:\\Users\\YOUR_USER\\dev\\flutter
+flutter.versionCode=1
+flutter.versionName=0.1.0

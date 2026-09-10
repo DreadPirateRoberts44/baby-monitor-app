@@ -1,0 +1,16 @@
+# Sideloaded-app signing key config. Copy to android/key.properties
+# (gitignored) once you've generated a keystore:
+#
+#   keytool -genkey -v -keystore ~/baby-monitor-release.jks \
+#     -keyalg RSA -keysize 2048 -validity 10000 -alias baby_monitor
+#
+# This key doesn't expire and isn't tied to a paid developer account
+# (unlike iOS) -- see the project's notes on why Android sideloading has
+# no recurring signing cost. Keep the .jks file itself out of git and
+# somewhere durable (it's needed to sign every future update to the same
+# install -- losing it means users have to uninstall/reinstall instead of
+# updating in place).
+storePassword=CHANGE_ME
+keyPassword=CHANGE_ME
+keyAlias=baby_monitor
+storeFile=C:\\path\\to\\baby-monitor-release.jks
