@@ -86,20 +86,34 @@ a "Developer" section at the bottom of the Settings screen:
 
 - **Seed sample data** — inserts ~30 days of fake feed/change events
   (jittered, roughly every 2.5-3.5h for feeds and every 3-4.5h for
-  changes) into the app's local queue (the same queue real "Log
+  changes) into the app's own local queue (the same queue real "Log
   feed"/"Log change" taps write to — see "Offline queue" below), and
   fakes an in-progress crying session on the Status tab by feeding a
   synthetic `cry_started` message through the same code path a real
-  MQTT message takes. This is enough data to exercise both the Care
-  log and History tabs' list/scroll behavior, not just their empty
-  states. This does **not** fake cry history or device-startup history
-  — those are Pi-owned and read-only by design (see PI_CONTRACT.md),
-  so there's nothing meaningful to seed locally; you need a real Pi
-  (or a manually-published fake MQTT message + sync-API response) to
-  see those show up on the History tab.
+  MQTT message takes. This is enough data to exercise the Care log
+  tab's list behavior. It does **not** touch cry history or
+  device-startup history — those are Pi-owned and read-only by design
+  (see PI_CONTRACT.md); use the fake monitor server below to see those
+  populated.
 - **Clear sample data** — removes what "Seed sample data" added
   (matched by a `"seed data"` note field) and resets the in-memory
   active session. Doesn't touch anything on a real Pi.
+- **Start/stop fake monitor server** — runs an in-process HTTP server
+  (`lib/services/fake_pi_server.dart`) that serves ~30 days of
+  realistic-looking cry sessions, device startup/shutdown events, and
+  button-logged feed/change history, shaped exactly like
+  `pi/sync_api.py`'s real JSON responses. While running, Settings'
+  host/port are temporarily repointed at `localhost:<fake port>` — the
+  real `SyncApiClient` code talks to it exactly as it would a real Pi,
+  so this exercises the actual HTTP/JSON parsing path, not just a UI
+  shortcut. "Stop" restores whatever host/port were configured before.
+  This is the only way to see the History tab's cry-session and
+  device-event rows populated without a real Pi — those stay
+  deliberately unseedable from the app's own local storage (see
+  history_screen.dart's comments on why cry data is Pi-only). Doesn't
+  start an MQTT broker — Status tab alerts still need a real Pi or a
+  manually-published test message (see "Testing against a real Pi"
+  below).
 
 This section is compiled out of release builds via `kDebugMode` — it's
 not just hidden, the code path doesn't exist in a `flutter build apk
@@ -128,23 +142,46 @@ repo's `docs/INSTALL.md`), or want to simulate one from a dev machine:
 4. Care events / history / pause / reset all exercise
    `pi/sync_api.py` directly — the easiest way to confirm they're
    wired up is to log a feed event in the app, then check it landed in
-   `care_events.sqlite` on the Pi (or just look for it in the app's
-   own history list on the next refresh, which pulls it straight back).
+   `care_events.sqlite` on the Pi (or just look for it on the **History**
+   tab on the next refresh, which pulls it straight back — the **Care
+   log** tab intentionally won't show it once synced, see below).
 
 ## Offline queue behavior (feed/change logging away from the Pi)
 
 Feed/change events are logged **locally first**, always, whether or
 not the Pi is reachable — see `lib/services/local_event_queue.dart`.
-To test this specifically:
+Once an event syncs to the Pi, it's deleted from the local queue (see
+`pruneSynced()`) — the Pi's copy is the only one that matters after
+that, and the app's two screens make different use of this:
 
-1. Turn off WiFi (or otherwise make the Pi unreachable).
-2. Log a feed or change event — it should appear immediately in the
-   list with a small cloud-off icon (pending sync).
-3. Reconnect to the Pi's WiFi, then pull-to-refresh the Care log tab
-   (or just reopen the app — a fresh MQTT connection also triggers a
-   sync attempt automatically).
-4. The pending icon should disappear once the event is confirmed
-   synced, and a snackbar reports how many events were pushed.
+- **Care log tab** is a "what's still pending" view, not a history
+  browser — it shows only this device's own not-yet-synced events from
+  the **last 24 hours** (see `care_events_screen.dart`'s doc comment).
+  Once an event syncs, it disappears from Care log — that's by design,
+  not a bug; go to History to see it there instead.
+- **History tab** shows the merged timeline: the Pi's confirmed cry
+  sessions, device events, and care events, plus any of *this device's*
+  care events that haven't synced yet. Because syncing deletes the
+  local row, there's no special-casing needed to avoid double-counting
+  — an event is either in the Pi's response or in the local queue,
+  never both at once.
+
+To test the queue itself:
+
+1. Turn off WiFi (or otherwise make the Pi/fake monitor server
+   unreachable).
+2. Log a feed or change event — it should appear immediately in Care
+   log with a cloud-off icon (pending sync), and also on History
+   (same icon).
+3. Reconnect, then pull-to-refresh either tab (or just reopen the app —
+   a fresh MQTT connection also triggers a sync attempt automatically).
+4. The event should disappear from Care log and lose its cloud-off icon
+   on History, and a snackbar reports how many events were pushed.
+5. Wait a day (or backdate a local row) to confirm Care log's 24-hour
+   window actually excludes older unsynced events — this matters if
+   the app is ever offline for an extended stretch; those events still
+   sync normally and still show on History, they just age out of the
+   Care log "what's pending" view.
 
 If a sync attempt fails partway through a batch (e.g. WiFi drops mid
 sync), already-synced events stay synced and the rest remain queued

@@ -16,12 +16,15 @@ see "Platform plan" below.
   cry-reason estimate as it updates mid-session.
 - Lets a caregiver log feed/change events from the app — logged to a
   local queue immediately (works with no network at all) and synced to
-  the Pi opportunistically, next time both are on the same WiFi — and
-  review/correct the history the wireless buttons and other family
-  members' app instances have logged.
-- Reviews history as one merged timeline: cry-session history and
-  device startup/shutdown history from the Pi, alongside feed/change
-  events (both Pi-confirmed and, if not yet synced, local-only).
+  the Pi opportunistically, next time both are on the same WiFi. A
+  **Care log** tab shows just this device's own not-yet-synced activity
+  from the last day (a "what's still pending" view, not history).
+- Reviews full history on a separate **History** tab: cry-session
+  history and device startup/shutdown history from the Pi, alongside
+  feed/change events — the Pi's confirmed ones plus, if not yet synced,
+  this device's own. An event lives in exactly one place at a time (the
+  local queue until synced, the Pi's history after), so nothing is ever
+  double-counted between Care log and History.
 - Lets a caregiver pause cry detection (escape hatch for a
   misbehaving model) and, with explicit confirmation, wipe all stored
   history on the Pi.
@@ -104,15 +107,20 @@ lib/
                                    reachable
     pi_connection_settings.dart   Host/port config + per-install device_id
     foreground_service.dart       Android foreground service wrapper
-    dev_seed_data.dart            Debug-only sample data (see
+    dev_seed_data.dart            Debug-only sample local data (see
                                    docs/DEVELOPMENT.md)
+    fake_pi_server.dart           Debug-only in-process fake sync API
+                                   (~30 days of cry/device/care history)
   screens/
     home_screen.dart              Status tab + navigation shell
-    care_events_screen.dart       Log/review feed & change events
-                                   (merges local queue + Pi history)
-    history_screen.dart           Cry-session history
+    care_events_screen.dart       Quick-log feed/change events; shows
+                                   only this device's pending (unsynced)
+                                   activity from the last day
+    history_screen.dart           Full merged history: Pi cry sessions +
+                                   device events + feed/change events
     settings_screen.dart          Connection config, pause toggle, reset,
-                                   debug-only seed-data controls
+                                   debug-only seed-data + fake-server
+                                   controls
 docs/
   PI_CONTRACT.md                  The Pi-side contract this app implements
   DEVELOPMENT.md                  Local setup, running, and testing guide

@@ -190,6 +190,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ],
           ),
+          const SizedBox(height: 8),
+          Text(
+            'Fake monitor server — serves ~30 days of realistic cry '
+            'sessions, startup/shutdown events, and feed/change history '
+            'over the real HTTP sync API, so History can be tested '
+            'without a real Pi. Temporarily repoints the host/port above; '
+            '"Stop" restores them.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          Consumer<AppState>(
+            builder: (context, appState, _) => FilledButton.tonalIcon(
+              onPressed: () async {
+                if (appState.isUsingFakePiServer) {
+                  await appState.stopFakePiServer();
+                  if (context.mounted) {
+                    _hostController.text = appState.settings.host ?? '';
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Fake monitor stopped.')),
+                    );
+                  }
+                } else {
+                  await appState.startFakePiServer();
+                  if (context.mounted) {
+                    _hostController.text = appState.settings.host ?? '';
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text(
+                              'Fake monitor running — check the History tab.')),
+                    );
+                  }
+                }
+              },
+              icon: Icon(appState.isUsingFakePiServer
+                  ? Icons.stop_circle
+                  : Icons.play_circle),
+              label: Text(appState.isUsingFakePiServer
+                  ? 'Stop fake monitor server'
+                  : 'Start fake monitor server'),
+            ),
+          ),
         ],
       ],
     );

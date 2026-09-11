@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import 'models/notify_event.dart';
+import 'services/fake_pi_server.dart';
 import 'services/local_event_queue.dart';
 import 'services/notify_listener.dart';
 import 'services/pi_connection_settings.dart';
@@ -33,6 +34,12 @@ class AppState extends ChangeNotifier {
   ConnectionStatus connectionStatus = ConnectionStatus.disconnected;
   ActiveCrySession? activeSession;
 
+  FakePiServer? _fakePiServer;
+  bool get isUsingFakePiServer => _fakePiServer != null;
+
+  String? _realHost;
+  int? _realSyncPort;
+
   AppState(this.settings) {
     notifyListener = NotifyListener(settings);
     syncApiClient = SyncApiClient(settings);
@@ -62,6 +69,34 @@ class AppState extends ChangeNotifier {
 
   void clearActiveSession() {
     activeSession = null;
+    notifyListeners();
+  }
+
+  /// Starts an in-process fake sync API (see services/fake_pi_server.dart)
+  /// and repoints Settings' host/port at it, so History/Care log can be
+  /// exercised against realistic-looking cry/device/care history with no
+  /// real Pi at all. Debug builds only (see settings_screen.dart's
+  /// kDebugMode gate) -- remembers the real host/port so "Stop" restores
+  /// them exactly, rather than leaving Settings pointed at localhost.
+  Future<void> startFakePiServer() async {
+    assert(kDebugMode, 'Fake Pi server is debug-only');
+    if (_fakePiServer != null) return;
+    _realHost = settings.host;
+    _realSyncPort = settings.syncPort;
+    final server = FakePiServer.generate();
+    final port = await server.start();
+    _fakePiServer = server;
+    await settings.setHost('localhost');
+    await settings.setSyncPort(port);
+    notifyListeners();
+  }
+
+  Future<void> stopFakePiServer() async {
+    if (_fakePiServer == null) return;
+    await _fakePiServer!.stop();
+    _fakePiServer = null;
+    if (_realHost != null) await settings.setHost(_realHost!);
+    if (_realSyncPort != null) await settings.setSyncPort(_realSyncPort!);
     notifyListeners();
   }
 
@@ -97,6 +132,7 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     notifyListener.dispose();
+    _fakePiServer?.stop();
     super.dispose();
   }
 }
