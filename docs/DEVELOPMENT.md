@@ -84,16 +84,19 @@ interesting happens until it's pointed at a real, running monitor. To
 exercise the UI before that's available, **debug builds only** expose
 a "Developer" section at the bottom of the Settings screen:
 
-- **Seed sample data** — inserts a few fake feed/change events into
-  the app's local queue (the same queue real "Log feed"/"Log change"
-  taps write to — see "Offline queue" below), and fakes an in-progress
-  crying session on the Status tab by feeding a synthetic
-  `cry_started` message through the same code path a real MQTT message
-  takes. This does **not** fake cry history or device-startup history
+- **Seed sample data** — inserts ~30 days of fake feed/change events
+  (jittered, roughly every 2.5-3.5h for feeds and every 3-4.5h for
+  changes) into the app's local queue (the same queue real "Log
+  feed"/"Log change" taps write to — see "Offline queue" below), and
+  fakes an in-progress crying session on the Status tab by feeding a
+  synthetic `cry_started` message through the same code path a real
+  MQTT message takes. This is enough data to exercise both the Care
+  log and History tabs' list/scroll behavior, not just their empty
+  states. This does **not** fake cry history or device-startup history
   — those are Pi-owned and read-only by design (see PI_CONTRACT.md),
   so there's nothing meaningful to seed locally; you need a real Pi
   (or a manually-published fake MQTT message + sync-API response) to
-  see those screens populated.
+  see those show up on the History tab.
 - **Clear sample data** — removes what "Seed sample data" added
   (matched by a `"seed data"` note field) and resets the in-memory
   active session. Doesn't touch anything on a real Pi.

@@ -19,7 +19,9 @@ see "Platform plan" below.
   the Pi opportunistically, next time both are on the same WiFi — and
   review/correct the history the wireless buttons and other family
   members' app instances have logged.
-- Reviews cry-session history and device startup/shutdown history.
+- Reviews history as one merged timeline: cry-session history and
+  device startup/shutdown history from the Pi, alongside feed/change
+  events (both Pi-confirmed and, if not yet synced, local-only).
 - Lets a caregiver pause cry detection (escape hatch for a
   misbehaving model) and, with explicit confirmation, wipe all stored
   history on the Pi.
