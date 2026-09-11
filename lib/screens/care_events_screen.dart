@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../models/care_event.dart';
-import '../services/sync_api_client.dart';
 
 class CareEventsScreen extends StatefulWidget {
   const CareEventsScreen({super.key});
@@ -23,48 +22,71 @@ class _CareEventsScreenState extends State<CareEventsScreen> {
     _refresh();
   }
 
+  /// Merges the Pi's synced history with anything still sitting in the
+  /// local queue (not-yet-synced, or synced-but-not-yet-pruned). See
+  /// docs/PI_CONTRACT.md and services/local_event_queue.dart -- the app
+  /// is the source of truth for an event until the Pi has confirmed it.
   Future<void> _refresh() async {
-    final client = context.read<AppState>().syncApiClient;
-    try {
-      final events = await client.getCareEvents();
-      events.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      if (mounted) setState(() {
-        _events = events;
-        _error = null;
-      });
-    } catch (e) {
-      // Expected outcome if off the home WiFi — see PI_CONTRACT.md.
-      if (mounted) setState(() => _error = 'Could not reach the monitor.');
-    }
-  }
-
-  Future<void> _logEvent(String eventType) async {
     final appState = context.read<AppState>();
-    final event = CareEvent(
-      eventType: eventType,
-      timestamp: DateTime.now(),
-      source: 'app',
-      deviceId: appState.settings.deviceId,
-    );
+
+    // Opportunistic: if we're reachable right now, push anything queued
+    // before pulling history, so a just-synced event shows as synced
+    // immediately instead of "pending" for one extra refresh.
+    final synced = await appState.syncCoordinator.sync();
+
+    List<CareEvent> remote = [];
+    var unreachable = false;
     try {
-      await appState.syncApiClient.postCareEvent(event);
-      await _refresh();
-    } catch (e) {
-      if (mounted) {
+      remote = await appState.syncApiClient.getCareEvents();
+    } catch (_) {
+      // Expected outcome off the home WiFi — see PI_CONTRACT.md. Local
+      // events still show below even when this fails.
+      unreachable = true;
+    }
+
+    final local = await appState.localEventQueue.getAll();
+
+    final merged = [...remote, ...local.where((e) => !e.synced)]
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
+    if (mounted) {
+      setState(() {
+        _events = merged;
+        _error = merged.isEmpty && unreachable
+            ? 'Could not reach the monitor.'
+            : null;
+      });
+      if (synced > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
               content: Text(
-                  "Couldn't log — not connected to the monitor's WiFi?")),
+                  'Synced $synced event${synced == 1 ? '' : 's'} to the monitor.')),
         );
       }
     }
   }
 
+  Future<void> _logEvent(String eventType) async {
+    final appState = context.read<AppState>();
+    // Local-first: this always succeeds instantly, whether or not we're
+    // on the Pi's WiFi right now. SyncCoordinator drains it later.
+    await appState.localEventQueue.enqueue(
+      eventType: eventType,
+      timestamp: DateTime.now(),
+      deviceId: appState.settings.deviceId,
+    );
+    await _refresh();
+  }
+
   Future<void> _delete(CareEvent event) async {
-    if (event.id == null) return;
-    final client = context.read<AppState>().syncApiClient;
+    final appState = context.read<AppState>();
     try {
-      await client.deleteCareEvent(event.id!);
+      if (event.localId != null) {
+        // Not yet synced -- just drop it locally, the Pi never saw it.
+        await appState.localEventQueue.deleteLocal(event.localId!);
+      } else if (event.id != null) {
+        await appState.syncApiClient.deleteCareEvent(event.id!);
+      }
       await _refresh();
     } catch (e) {
       if (mounted) {
@@ -106,14 +128,23 @@ class _CareEventsScreenState extends State<CareEventsScreen> {
   }
 
   Widget _buildList() {
-    if (_error != null) {
-      return Center(child: Text(_error!));
-    }
     if (_events == null) {
       return const Center(child: CircularProgressIndicator());
     }
     if (_events!.isEmpty) {
-      return const Center(child: Text('No feed/change events logged yet.'));
+      return RefreshIndicator(
+        onRefresh: _refresh,
+        child: ListView(
+          children: [
+            SizedBox(
+              height: 300,
+              child: Center(
+                child: Text(_error ?? 'No feed/change events logged yet.'),
+              ),
+            ),
+          ],
+        ),
+      );
     }
     return RefreshIndicator(
       onRefresh: _refresh,
@@ -124,7 +155,20 @@ class _CareEventsScreenState extends State<CareEventsScreen> {
           return ListTile(
             leading: Icon(
                 e.eventType == 'feed' ? Icons.restaurant : Icons.child_friendly),
-            title: Text(e.eventType == 'feed' ? 'Fed' : 'Changed'),
+            title: Row(
+              children: [
+                Text(e.eventType == 'feed' ? 'Fed' : 'Changed'),
+                if (!e.synced) ...[
+                  const SizedBox(width: 8),
+                  Tooltip(
+                    message: 'Not yet synced to the monitor — will sync '
+                        'automatically once back on its WiFi.',
+                    child: Icon(Icons.cloud_off,
+                        size: 16, color: Theme.of(context).colorScheme.outline),
+                  ),
+                ],
+              ],
+            ),
             subtitle: Text(
                 '${DateFormat.yMMMd().add_jm().format(e.timestamp.toLocal())} · ${e.source}'),
             trailing: IconButton(

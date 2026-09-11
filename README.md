@@ -14,8 +14,9 @@ see "Platform plan" below.
   alerts (with a locally-played sound, not a system push notification)
   when a cry starts or ends; silently refreshes the displayed
   cry-reason estimate as it updates mid-session.
-- Lets a caregiver log feed/change events from the app (synced to the
-  Pi opportunistically, next time both are on the same WiFi) and
+- Lets a caregiver log feed/change events from the app — logged to a
+  local queue immediately (works with no network at all) and synced to
+  the Pi opportunistically, next time both are on the same WiFi — and
   review/correct the history the wireless buttons and other family
   members' app instances have logged.
 - Reviews cry-session history and device startup/shutdown history.
@@ -64,6 +65,11 @@ First run: copy `android/local.properties.example` to
 tooling will also do this automatically on first `flutter run`/`pub
 get` if the file is missing).
 
+**See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** for full local
+setup (including a couple of Gradle/JDK version gotchas we hit) and
+how to test the app's features — including without a real Pi, via the
+debug-only seed-data option in Settings.
+
 To build a release APK for sideloading:
 ```
 flutter build apk --release
@@ -90,13 +96,22 @@ lib/
   services/
     notify_listener.dart          Persistent MQTT client
     sync_api_client.dart          HTTP client for pi/sync_api.py
+    local_event_queue.dart        Local-first offline queue for feed/
+                                   change events (sqflite-backed)
+    sync_coordinator.dart         Drains the local queue to the Pi when
+                                   reachable
     pi_connection_settings.dart   Host/port config + per-install device_id
     foreground_service.dart       Android foreground service wrapper
+    dev_seed_data.dart            Debug-only sample data (see
+                                   docs/DEVELOPMENT.md)
   screens/
     home_screen.dart              Status tab + navigation shell
     care_events_screen.dart       Log/review feed & change events
+                                   (merges local queue + Pi history)
     history_screen.dart           Cry-session history
-    settings_screen.dart          Connection config, pause toggle, reset
+    settings_screen.dart          Connection config, pause toggle, reset,
+                                   debug-only seed-data controls
 docs/
   PI_CONTRACT.md                  The Pi-side contract this app implements
+  DEVELOPMENT.md                  Local setup, running, and testing guide
 ```

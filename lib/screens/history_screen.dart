@@ -5,6 +5,31 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../models/care_event.dart';
 
+/// A single row in the merged history timeline -- either a completed
+/// cry session or a device startup/shutdown marker. Merging these (both
+/// sorted by time) is what lets device events actually do their job:
+/// PI_CONTRACT.md notes they exist so a long gap between cry sessions
+/// reads as "the monitor was off" rather than "the baby just didn't cry
+/// for a suspiciously long time" -- that only works if they're visible
+/// in the same timeline, not fetched and silently discarded.
+sealed class _TimelineEntry {
+  DateTime get sortKey;
+}
+
+class _SessionEntry extends _TimelineEntry {
+  final CrySession session;
+  _SessionEntry(this.session);
+  @override
+  DateTime get sortKey => session.startedAt;
+}
+
+class _DeviceEntry extends _TimelineEntry {
+  final DeviceEvent event;
+  _DeviceEntry(this.event);
+  @override
+  DateTime get sortKey => event.timestamp;
+}
+
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
 
@@ -13,8 +38,7 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
-  List<CrySession>? _sessions;
-  List<DeviceEvent>? _deviceEvents;
+  List<_TimelineEntry>? _timeline;
   String? _error;
 
   @override
@@ -28,11 +52,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
     try {
       final sessions = await client.getCryHistory();
       final deviceEvents = await client.getDeviceEvents();
-      sessions.sort((a, b) => b.startedAt.compareTo(a.startedAt));
+      final timeline = <_TimelineEntry>[
+        ...sessions.map(_SessionEntry.new),
+        ...deviceEvents.map(_DeviceEntry.new),
+      ]..sort((a, b) => b.sortKey.compareTo(a.sortKey));
       if (mounted) {
         setState(() {
-          _sessions = sessions;
-          _deviceEvents = deviceEvents;
+          _timeline = timeline;
           _error = null;
         });
       }
@@ -44,27 +70,50 @@ class _HistoryScreenState extends State<HistoryScreen> {
   @override
   Widget build(BuildContext context) {
     if (_error != null) return Center(child: Text(_error!));
-    if (_sessions == null) {
+    if (_timeline == null) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_sessions!.isEmpty) {
-      return const Center(child: Text('No crying sessions recorded yet.'));
+    if (_timeline!.isEmpty) {
+      return const Center(child: Text('No history recorded yet.'));
     }
 
     return RefreshIndicator(
       onRefresh: _refresh,
       child: ListView.builder(
-        itemCount: _sessions!.length,
+        itemCount: _timeline!.length,
         itemBuilder: (context, i) {
-          final s = _sessions![i];
-          return ListTile(
-            leading: const Icon(Icons.hearing),
-            title: Text(
-                '${s.topReason[0].toUpperCase()}${s.topReason.substring(1)} · ${s.durationSeconds.toStringAsFixed(0)}s'),
-            subtitle: Text(
-                DateFormat.yMMMd().add_jm().format(s.startedAt.toLocal())),
-            onTap: () => _showDetail(s),
-          );
+          final entry = _timeline![i];
+          return switch (entry) {
+            _SessionEntry(session: final s) => ListTile(
+                leading: const Icon(Icons.hearing),
+                title: Text(
+                    '${s.topReason[0].toUpperCase()}${s.topReason.substring(1)} · ${s.durationSeconds.toStringAsFixed(0)}s'),
+                subtitle: Text(
+                    DateFormat.yMMMd().add_jm().format(s.startedAt.toLocal())),
+                onTap: () => _showDetail(s),
+              ),
+            _DeviceEntry(event: final e) => ListTile(
+                dense: true,
+                leading: Icon(
+                  e.eventType == 'startup'
+                      ? Icons.power_settings_new
+                      : Icons.power_off,
+                  size: 20,
+                  color: Theme.of(context).colorScheme.outline,
+                ),
+                title: Text(
+                  e.eventType == 'startup'
+                      ? 'Monitor started'
+                      : 'Monitor stopped',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.outline),
+                ),
+                subtitle: Text(
+                  DateFormat.yMMMd().add_jm().format(e.timestamp.toLocal()) +
+                      (e.reason != null ? ' · ${e.reason}' : ''),
+                ),
+              ),
+          };
         },
       ),
     );

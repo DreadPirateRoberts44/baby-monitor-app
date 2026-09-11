@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../app_state.dart';
+import '../services/dev_seed_data.dart';
 import '../services/foreground_service.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -147,6 +149,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 8),
         Text('This device ID: ${settings.deviceId}',
             style: Theme.of(context).textTheme.bodySmall),
+        if (kDebugMode) ...[
+          const Divider(height: 40),
+          Text('Developer', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text(
+            'Debug builds only — lets you exercise the UI without a real '
+            'monitor. Never present in a release build.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () async {
+                    await DevSeedData.seed(context.read<AppState>());
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Sample data seeded.')),
+                      );
+                    }
+                  },
+                  child: const Text('Seed sample data'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () async {
+                    await DevSeedData.clear(context.read<AppState>());
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Sample data cleared.')),
+                      );
+                    }
+                  },
+                  child: const Text('Clear sample data'),
+                ),
+              ),
+            ],
+          ),
+        ],
       ],
     );
   }
