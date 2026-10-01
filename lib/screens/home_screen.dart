@@ -41,7 +41,20 @@ class _HomeScreenState extends State<HomeScreen> {
     ];
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Baby Monitor')),
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('AmliOS'),
+            Text(
+              'Accessible monitoring and logging intelligent Operating System',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
       body: screens[_tab],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
@@ -126,11 +139,7 @@ class _ConnectionBanner extends StatelessWidget {
           Icons.check_circle,
           'Connected — listening for alerts'
         ),
-      ConnectionStatus.connecting => (
-          Colors.orange,
-          Icons.sync,
-          'Connecting…'
-        ),
+      ConnectionStatus.connecting => (Colors.orange, Icons.sync, 'Connecting…'),
       ConnectionStatus.disconnected => (
           Colors.red,
           Icons.error_outline,
@@ -177,10 +186,10 @@ class _ActiveSessionCard extends StatelessWidget {
     final probs = session.latestReasonProbs;
     String? topReason;
     if (probs != null && probs.isNotEmpty) {
-      topReason =
-          (probs.entries.toList()..sort((a, b) => b.value.compareTo(a.value)))
-              .first
-              .key;
+      topReason = (probs.entries.toList()
+            ..sort((a, b) => b.value.compareTo(a.value)))
+          .first
+          .key;
     }
 
     return Card(
@@ -197,16 +206,46 @@ class _ActiveSessionCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text('Started: ${session.startedAt.toLocal()}'),
             if (session.durationSeconds != null)
+              Text('Duration: ${session.durationSeconds!.toStringAsFixed(0)}s'),
+            if (session.confirmedCrySeconds != null &&
+                session.cryDensity != null)
               Text(
-                  'Duration: ${session.durationSeconds!.toStringAsFixed(0)}s'),
+                'Confirmed crying: ${session.confirmedCrySeconds!.toStringAsFixed(0)}s '
+                '(${(session.cryDensity! * 100).toStringAsFixed(0)}% of session)',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
             if (topReason != null) ...[
               const SizedBox(height: 8),
               Text('Likely reason: $topReason',
                   style: Theme.of(context).textTheme.titleMedium),
             ],
+            if (session.context.secondsSinceFeed != null ||
+                session.context.secondsSinceChange != null) ...[
+              const SizedBox(height: 8),
+              if (session.context.secondsSinceFeed != null)
+                Text(
+                  '${_formatSince(session.context.secondsSinceFeed!)} since last feed',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              if (session.context.secondsSinceChange != null)
+                Text(
+                  '${_formatSince(session.context.secondsSinceChange!)} since last change',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  /// e.g. 11520 -> "3.2h", 90 -> "2m" -- mirrors PI_CONTRACT.md's own
+  /// example format ("3.2h since feed") rather than a full h/m/s
+  /// breakdown, since the point is a rough at-a-glance sense of "was it
+  /// recent," not precise elapsed time.
+  String _formatSince(double seconds) {
+    if (seconds < 60) return '${seconds.toStringAsFixed(0)}s';
+    if (seconds < 3600) return '${(seconds / 60).toStringAsFixed(0)}m';
+    return '${(seconds / 3600).toStringAsFixed(1)}h';
   }
 }

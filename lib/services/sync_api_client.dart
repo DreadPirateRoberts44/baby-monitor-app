@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/care_event.dart';
+import '../models/detection_settings.dart';
 import 'pi_connection_settings.dart';
 
 /// Thin client over pi/sync_api.py. LAN-only, no auth — see
@@ -84,6 +85,57 @@ class SyncApiClient {
     _checkOk(resp);
   }
 
+  Future<DetectionSettings> getDetectionSettings() async {
+    final resp = await _http.get(_uri('/detection_settings'));
+    _checkOk(resp);
+    return DetectionSettings.fromJson(
+        jsonDecode(resp.body) as Map<String, dynamic>);
+  }
+
+  /// Any subset of the three fields -- omit a parameter to leave that
+  /// value unchanged on the Pi rather than resetting it. Throws
+  /// DetectionSettingsException (distinct from SyncApiException) on a
+  /// 400, since that's a validation message meant to reach the user
+  /// ("threshold must be 0-1"), not a connectivity failure.
+  Future<DetectionSettings> updateDetectionSettings({
+    double? stage1ConfidenceThreshold,
+    int? sessionStartMinWindows,
+    int? sessionEndMissedWindows,
+  }) async {
+    final resp = await _http.post(
+      _uri('/detection_settings'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        if (stage1ConfidenceThreshold != null)
+          'stage1_confidence_threshold': stage1ConfidenceThreshold,
+        if (sessionStartMinWindows != null)
+          'session_start_min_windows': sessionStartMinWindows,
+        if (sessionEndMissedWindows != null)
+          'session_end_missed_windows': sessionEndMissedWindows,
+      }),
+    );
+    return _decodeDetectionSettingsResponse(resp);
+  }
+
+  Future<DetectionSettings> resetDetectionSettings() async {
+    final resp = await _http.post(
+      _uri('/detection_settings'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'reset': true}),
+    );
+    return _decodeDetectionSettingsResponse(resp);
+  }
+
+  DetectionSettings _decodeDetectionSettingsResponse(http.Response resp) {
+    if (resp.statusCode == 400) {
+      final body = jsonDecode(resp.body) as Map<String, dynamic>;
+      throw DetectionSettingsException(body['error'] as String? ?? 'Invalid settings');
+    }
+    _checkOk(resp);
+    return DetectionSettings.fromJson(
+        jsonDecode(resp.body) as Map<String, dynamic>);
+  }
+
   /// Irreversible on the Pi side. The Pi does zero confirmation of its
   /// own — see PI_CONTRACT.md: "THE APP OWNS ALL CONFIRM/WARNING UX."
   /// Callers must obtain explicit user confirmation before calling this.
@@ -118,4 +170,12 @@ class SyncApiException implements Exception {
 
   @override
   String toString() => 'SyncApiException($statusCode): $body';
+}
+
+class DetectionSettingsException implements Exception {
+  final String message;
+  DetectionSettingsException(this.message);
+
+  @override
+  String toString() => 'DetectionSettingsException: $message';
 }

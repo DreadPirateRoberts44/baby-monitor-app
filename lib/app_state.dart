@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import 'models/notify_event.dart';
+import 'services/alert_sound_player.dart';
 import 'services/fake_pi_server.dart';
 import 'services/local_event_queue.dart';
 import 'services/notify_listener.dart';
@@ -16,11 +17,28 @@ class ActiveCrySession {
   final DateTime startedAt;
   Map<String, double>? latestReasonProbs;
   double? durationSeconds;
+
+  /// See docs/PI_CONTRACT.md's Session tracking section -- both null until
+  /// the first reasonUpdated/cryEnded (cryStarted never carries them, see
+  /// NotifyEvent).
+  double? confirmedCrySeconds;
+  double? cryDensity;
+
+  /// Time since the last feed/change as of this session's most recent
+  /// update -- present on every message kind (unlike confirmedCrySeconds/
+  /// cryDensity above), so worth surfacing even on a freshly-started
+  /// session per PI_CONTRACT.md ("worth surfacing... e.g. '3.2h since
+  /// feed'").
+  CryContext context;
+
   bool ended;
 
   ActiveCrySession({required this.startedAt})
       : latestReasonProbs = null,
         durationSeconds = null,
+        confirmedCrySeconds = null,
+        cryDensity = null,
+        context = const CryContext(),
         ended = false;
 }
 
@@ -30,6 +48,7 @@ class AppState extends ChangeNotifier {
   late final SyncApiClient syncApiClient;
   late final LocalEventQueue localEventQueue;
   late final SyncCoordinator syncCoordinator;
+  final AlertSoundPlayer _alertSoundPlayer = AlertSoundPlayer();
 
   ConnectionStatus connectionStatus = ConnectionStatus.disconnected;
   ActiveCrySession? activeSession;
@@ -108,7 +127,9 @@ class AppState extends ChangeNotifier {
     switch (event.kind) {
       case NotifyEventKind.cryStarted:
         activeSession = ActiveCrySession(startedAt: event.timestamp)
-          ..latestReasonProbs = event.stage2Probs;
+          ..latestReasonProbs = event.stage2Probs
+          ..context = event.context;
+        _alertSoundPlayer.playCryStartedChime();
         break;
       case NotifyEventKind.reasonUpdated:
         // Silent refresh only — deliberately not an alert (see
@@ -118,11 +139,17 @@ class AppState extends ChangeNotifier {
         activeSession ??= ActiveCrySession(startedAt: event.timestamp);
         activeSession!.latestReasonProbs = event.aggregatedStage2Probs;
         activeSession!.durationSeconds = event.durationSeconds;
+        activeSession!.confirmedCrySeconds = event.confirmedCrySeconds;
+        activeSession!.cryDensity = event.cryDensity;
+        activeSession!.context = event.context;
         break;
       case NotifyEventKind.cryEnded:
         activeSession ??= ActiveCrySession(startedAt: event.timestamp);
         activeSession!.latestReasonProbs = event.aggregatedStage2Probs;
         activeSession!.durationSeconds = event.durationSeconds;
+        activeSession!.confirmedCrySeconds = event.confirmedCrySeconds;
+        activeSession!.cryDensity = event.cryDensity;
+        activeSession!.context = event.context;
         activeSession!.ended = true;
         break;
     }
@@ -133,6 +160,7 @@ class AppState extends ChangeNotifier {
   void dispose() {
     notifyListener.dispose();
     _fakePiServer?.stop();
+    _alertSoundPlayer.dispose();
     super.dispose();
   }
 }

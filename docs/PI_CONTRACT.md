@@ -56,21 +56,49 @@ own local sound** when a `cry_started` message arrives.
  "context": {"seconds_since_feed": 1820.4, "seconds_since_change": null}}
 
 {"event": "reason_updated", "timestamp": "...", "duration_seconds": 42.1,
- "aggregated_stage2_probs": {"...": "..."}, "context": {"...": "..."}}
+ "aggregated_stage2_probs": {"...": "..."}, "confirmed_cry_seconds": 38.0,
+ "cry_density": 0.903, "context": {"...": "..."}}
 
 {"event": "cry_ended", "timestamp": "...", "duration_seconds": 96.3,
- "aggregated_stage2_probs": {"...": "..."}, "context": {"...": "..."}}
+ "aggregated_stage2_probs": {"...": "..."}, "confirmed_cry_seconds": 52.0,
+ "cry_density": 0.54, "context": {"...": "..."}}
 ```
 
 Map these to three distinct UI behaviors, matching the Pi-side
 alert/live-update split:
-- **`cry_started`** — an **alert**: interrupt/notify, play a sound.
+- **`cry_started`** — an **alert**: interrupt/notify, play a sound. Fires
+  only after several consecutive confident-cry windows on the Pi side
+  (`settings.SESSION_START_MIN_WINDOWS`), filtering out a single
+  misclassified window before the app ever sees it — so there's a few
+  seconds of latency between the baby actually starting to cry and this
+  message, by design.
 - **`reason_updated`** — a **live update only**: silently refresh the
   currently-displayed session's reason estimate. Do NOT alert/buzz —
   the caregiver has already been notified the baby is crying; this
   just means the reason guess changed as more audio accumulated.
-- **`cry_ended`** — an **alert**: notify that the episode is over,
-  carries the final aggregated reason.
+- **`cry_ended`** — an **alert**: tells the app the episode is over,
+  carries the final aggregated reason. Can fire up to
+  `settings.SESSION_MERGE_WINDOW_SECONDS` (default 10 min on the Pi)
+  after the caregiver actually heard/handled the cry, because a
+  session on the Pi side stays open across quiet gaps that short (baby
+  picked up and carried out of mic range, still crying, shouldn't count
+  as a second session) — treat this as lower-urgency than `cry_started`
+  in whatever UI/sound choice distinguishes them (e.g. no buzz, just
+  update the active-session card to a "did it stop?" state and clear it
+  after a short delay), but DO still handle it: it's the only reliable
+  signal that a session is over, and without it an active-session UI
+  would otherwise stay showing "crying now" indefinitely if nothing else
+  times it out.
+
+`"confirmed_cry_seconds"`/`"cry_density"` (on `reason_updated`/`cry_ended`
+only — never `cry_started`, where it would trivially read `1.0`/full
+duration and add nothing) distinguish "session ran long because the baby
+cried the whole time" from "session ran long because of an absorbed quiet
+gap, only part of it was confirmed crying." `cry_density` is
+`confirmed_cry_seconds / duration_seconds`, 0.0–1.0, 1.0 = wall-to-wall
+confirmed crying. Worth surfacing somewhere in session detail UI (e.g.
+"38s confirmed crying, 90% of session") now that `duration_seconds` alone
+can be misleading about how much of that time was actually crying.
 
 `"context"` (time since feed/change) is intentionally not blended into
 the model's probabilities — show it as plain context next to the
@@ -94,10 +122,35 @@ POST   /care_events                     push one event:
                                             handling needed; see dedup below)
 DELETE /care_events/<id>                remove one event (error correction)
 
-GET    /cry_history?since=<ISO8601>     read-only cry-session history
+GET    /cry_history?since=<ISO8601>     read-only cry-session history ->
+                                         {"sessions": [{"id", "started_at",
+                                          "ended_at", "duration_seconds",
+                                          "top_reason", "reason_probs",
+                                          "confirmed_cry_seconds",
+                                          "cry_density"}, ...]}
+                                         (confirmed_cry_seconds/cry_density:
+                                         same meaning as the MQTT payloads
+                                         above)
 GET    /device_events?since=<ISO8601>   read-only startup/shutdown log
                                          (explains gaps in cry_history —
                                          monitor was off, not "no crying")
+
+GET    /detection_settings              {"stage1_confidence_threshold": 0.85,
+                                          "session_start_min_windows": 2,
+                                          "session_end_missed_windows": 150}
+POST   /detection_settings              body: any subset of the three keys,
+                                         e.g. {"stage1_confidence_threshold":
+                                         0.8} -> 200 with all three current
+                                         values, or 400 {"error": "..."} if
+                                         invalid.
+                                         {"reset": true} restores Pi defaults
+                                         (returns all three, same as above).
+                                         stage1_confidence_threshold is the
+                                         same stage-1 gate as cry_started's
+                                         confidence (see MQTT section);
+                                         session_start_min_windows is
+                                         settings.SESSION_START_MIN_WINDOWS,
+                                         also referenced above.
 
 GET    /prediction_state                {"paused": true|false}
 POST   /prediction_state                {"paused": true|false} ->
@@ -106,8 +159,14 @@ POST   /prediction_state                {"paused": true|false} ->
                                          the escape hatch for a misbehaving
                                          model. Capture keeps running;
                                          only predict/notify/history are
-                                         skipped. An in-progress session is
-                                         force-ended when pause takes effect.
+                                         skipped. A CONFIRMED in-progress
+                                         session is force-ended (fires
+                                         cry_ended normally) when pause
+                                         takes effect; an unconfirmed
+                                         candidate (hadn't reached
+                                         SESSION_START_MIN_WINDOWS yet) is
+                                         just discarded -- it was never
+                                         alerted, so there's nothing to end.
 
 POST   /reset                           {"confirm": "RESET"} ->
                                          {"status": "reset",

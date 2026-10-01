@@ -27,6 +27,19 @@ class NotifyEvent {
   final Map<String, double>? stage2Probs;
   final Map<String, double>? aggregatedStage2Probs;
   final double? durationSeconds;
+
+  /// Approximate seconds of ACTUAL confident crying within the session, as
+  /// opposed to [durationSeconds] which also counts any quiet gap the
+  /// Pi-side merge window absorbed (see docs/PI_CONTRACT.md). Present on
+  /// reasonUpdated/cryEnded only -- null on cryStarted, where it would
+  /// trivially equal the elapsed time so far and add nothing.
+  final double? confirmedCrySeconds;
+
+  /// confirmedCrySeconds / durationSeconds as a 0.0-1.0 ratio -- 1.0 means
+  /// wall-to-wall confirmed crying with no absorbed gaps. Same
+  /// null-on-cryStarted rule as confirmedCrySeconds.
+  final double? cryDensity;
+
   final CryContext context;
 
   const NotifyEvent({
@@ -36,6 +49,8 @@ class NotifyEvent {
     this.stage2Probs,
     this.aggregatedStage2Probs,
     this.durationSeconds,
+    this.confirmedCrySeconds,
+    this.cryDensity,
     required this.context,
   });
 
@@ -63,6 +78,8 @@ class NotifyEvent {
       stage2Probs: _probsMap(json['stage2_probs']),
       aggregatedStage2Probs: _probsMap(json['aggregated_stage2_probs']),
       durationSeconds: (json['duration_seconds'] as num?)?.toDouble(),
+      confirmedCrySeconds: (json['confirmed_cry_seconds'] as num?)?.toDouble(),
+      cryDensity: (json['cry_density'] as num?)?.toDouble(),
       context: CryContext.fromJson(json['context'] as Map<String, dynamic>?),
     );
   }

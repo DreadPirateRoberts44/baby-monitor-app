@@ -17,8 +17,29 @@ enum ConnectionStatus { disconnected, connecting, connected }
 class NotifyListener {
   static const _topic = 'babymonitor/notify';
 
+  /// Backoff schedule for retrying a *first* connect attempt that failed
+  /// outright (wrong host, Pi off, not on its WiFi yet) -- mqtt_client's
+  /// own autoReconnect only ever engages after a connection has
+  /// succeeded at least once, so without this a failed initial connect()
+  /// would otherwise sit disconnected forever until something (Settings,
+  /// app restart) calls connect() again by hand.
+  static const _retryDelays = [
+    Duration(seconds: 5),
+    Duration(seconds: 10),
+    Duration(seconds: 20),
+    Duration(seconds: 40),
+    Duration(seconds: 60),
+  ];
+
   final PiConnectionSettings settings;
   MqttServerClient? _client;
+  Timer? _retryTimer;
+  int _retryAttempt = 0;
+
+  /// Bumped on every manual connect() call so a stale retry (scheduled
+  /// before the settings changed, or before a newer manual reconnect)
+  /// doesn't fire after the fact and stomp on a newer attempt.
+  int _connectGeneration = 0;
 
   final _statusController = StreamController<ConnectionStatus>.broadcast();
   final _eventController = StreamController<NotifyEvent>.broadcast();
@@ -29,6 +50,14 @@ class NotifyListener {
   NotifyListener(this.settings);
 
   Future<void> connect() async {
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    _retryAttempt = 0;
+    final generation = ++_connectGeneration;
+    await _attemptConnect(generation);
+  }
+
+  Future<void> _attemptConnect(int generation) async {
     final host = settings.host;
     if (host == null || host.isEmpty) return;
 
@@ -41,6 +70,7 @@ class NotifyListener {
     client.keepAlivePeriod = 30;
     client.autoReconnect = true;
     client.onConnected = () {
+      _retryAttempt = 0;
       _statusController.add(ConnectionStatus.connected);
     };
     client.onDisconnected = () {
@@ -62,11 +92,13 @@ class NotifyListener {
     } catch (_) {
       client.disconnect();
       _statusController.add(ConnectionStatus.disconnected);
+      _scheduleRetry(generation);
       return;
     }
 
     if (client.connectionStatus?.state != MqttConnectionState.connected) {
       _statusController.add(ConnectionStatus.disconnected);
+      _scheduleRetry(generation);
       return;
     }
 
@@ -85,6 +117,17 @@ class NotifyListener {
     });
   }
 
+  void _scheduleRetry(int generation) {
+    if (generation != _connectGeneration) return;
+    final delay = _retryDelays[
+        _retryAttempt.clamp(0, _retryDelays.length - 1)];
+    _retryAttempt++;
+    _retryTimer = Timer(delay, () {
+      if (generation != _connectGeneration) return;
+      _attemptConnect(generation);
+    });
+  }
+
   void _handleMessage(String text) {
     try {
       final json = jsonDecode(text) as Map<String, dynamic>;
@@ -97,6 +140,9 @@ class NotifyListener {
   }
 
   void disconnect() {
+    _connectGeneration++;
+    _retryTimer?.cancel();
+    _retryTimer = null;
     _client?.disconnect();
     _client = null;
   }

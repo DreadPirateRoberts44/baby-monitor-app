@@ -60,6 +60,19 @@ class CrySession {
   final String topReason;
   final Map<String, double> reasonProbs;
 
+  /// Approximate seconds of ACTUAL confident crying within the session, as
+  /// opposed to [durationSeconds] which also counts any quiet gap the
+  /// Pi-side merge window absorbed (see docs/PI_CONTRACT.md's Session
+  /// tracking section). Defaults to durationSeconds (i.e. density 1.0) for
+  /// rows from a Pi build that predates this field, rather than 0 --
+  /// silently reading as "not much crying happened" would be the more
+  /// misleading fallback for old history.
+  final double confirmedCrySeconds;
+
+  /// confirmedCrySeconds / durationSeconds as a 0.0-1.0 ratio -- 1.0 means
+  /// wall-to-wall confirmed crying with no absorbed gaps.
+  final double cryDensity;
+
   const CrySession({
     required this.id,
     required this.startedAt,
@@ -67,18 +80,30 @@ class CrySession {
     required this.durationSeconds,
     required this.topReason,
     required this.reasonProbs,
+    required this.confirmedCrySeconds,
+    required this.cryDensity,
   });
 
-  factory CrySession.fromJson(Map<String, dynamic> json) => CrySession(
-        id: json['id'] as String,
-        startedAt: DateTime.parse(json['started_at'] as String),
-        endedAt: DateTime.parse(json['ended_at'] as String),
-        durationSeconds: (json['duration_seconds'] as num).toDouble(),
-        topReason: json['top_reason'] as String,
-        reasonProbs: (json['reason_probs'] as Map).map(
-          (k, v) => MapEntry(k as String, (v as num).toDouble()),
-        ),
-      );
+  factory CrySession.fromJson(Map<String, dynamic> json) {
+    final durationSeconds = (json['duration_seconds'] as num).toDouble();
+    final confirmedCrySeconds =
+        (json['confirmed_cry_seconds'] as num?)?.toDouble() ??
+            durationSeconds;
+    final cryDensity = (json['cry_density'] as num?)?.toDouble() ??
+        (durationSeconds > 0 ? 1.0 : 0.0);
+    return CrySession(
+      id: json['id'] as String,
+      startedAt: DateTime.parse(json['started_at'] as String),
+      endedAt: DateTime.parse(json['ended_at'] as String),
+      durationSeconds: durationSeconds,
+      topReason: json['top_reason'] as String,
+      reasonProbs: (json['reason_probs'] as Map).map(
+        (k, v) => MapEntry(k as String, (v as num).toDouble()),
+      ),
+      confirmedCrySeconds: confirmedCrySeconds,
+      cryDensity: cryDensity,
+    );
+  }
 }
 
 class DeviceEvent {

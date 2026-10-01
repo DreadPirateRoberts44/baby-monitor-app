@@ -14,16 +14,36 @@ import 'package:flutter/foundation.dart';
 ///
 /// Serves canned, generated-on-start responses shaped exactly like
 /// pi/sync_api.py's real JSON (see that file's _session_to_json /
-/// _device_event_to_json / _event_to_json). Read-only endpoints only --
-/// POST /care_events, /prediction_state, /reset all return simple
-/// stubbed-OK responses rather than actually persisting anything,
-/// since the point is to view history, not to test the Pi's own write
-/// logic (that's pi/sync_api.py's own responsibility to test).
+/// _device_event_to_json / _event_to_json). cry_history/device_events
+/// stay fully read-only (no POST changes them) since they're Pi-owned
+/// per PI_CONTRACT.md and this server exists to let History be viewed,
+/// not to test the Pi's own cry-detection/write logic. /prediction_state,
+/// /detection_settings, and POST /care_events DO hold real (in-memory
+/// only, reset on restart) state, though, specifically so the app's own
+/// response-handling branches -- the pause toggle's round-trip,
+/// PI_CONTRACT.md's same-type-within-5-minutes dedup producing
+/// skipped_duplicate, and detection_settings' 400-on-invalid path -- are
+/// actually exercisable without a real Pi.
+/// /reset and DELETE /care_events/<id> remain simple stubbed-OK
+/// responses; wiring those up to the in-memory lists isn't worth it
+/// since nothing here depends on a delete/reset having actually
+/// happened afterwards.
 class FakePiServer {
+  static const _dedupWindow = Duration(minutes: 5);
+
+  static const _defaultDetectionSettings = {
+    'stage1_confidence_threshold': 0.85,
+    'session_start_min_windows': 2,
+    'session_end_missed_windows': 150,
+  };
+
   HttpServer? _server;
   final List<Map<String, dynamic>> _sessions;
   final List<Map<String, dynamic>> _deviceEvents;
   final List<Map<String, dynamic>> _careEvents;
+  bool _predictionPaused = false;
+  Map<String, dynamic> _detectionSettings =
+      Map<String, dynamic>.from(_defaultDetectionSettings);
 
   FakePiServer._(this._sessions, this._deviceEvents, this._careEvents);
 
@@ -97,6 +117,15 @@ class FakePiServer {
         }
         probs[topReason] = remaining;
 
+        // Most seeded sessions are dense (wall-to-wall crying); an
+        // occasional one is sparse (a long merge-window gap absorbed) --
+        // gives History something realistic to show for both cases
+        // rather than always 100%.
+        final density = random.nextDouble() < 0.2
+            ? 0.2 + random.nextDouble() * 0.5
+            : 0.8 + random.nextDouble() * 0.2;
+        final confirmedCrySeconds = durationSeconds * density;
+
         sessions.add({
           'id': 'seed-session-${sessions.length}',
           'started_at': startedAt.toIso8601String(),
@@ -104,6 +133,8 @@ class FakePiServer {
           'duration_seconds': durationSeconds,
           'top_reason': topReason,
           'reason_probs': probs,
+          'confirmed_cry_seconds': confirmedCrySeconds,
+          'cry_density': density,
         });
       }
       day = day.add(const Duration(days: 1));
@@ -190,15 +221,102 @@ class FakePiServer {
         };
         break;
       case 'GET /prediction_state':
-        body = {'paused': false};
+        body = {'paused': _predictionPaused};
+        break;
+      case 'GET /detection_settings':
+        body = _detectionSettings;
         break;
       default:
-        if (request.method == 'POST' &&
-            (path == '/care_events' ||
-                path == '/prediction_state' ||
-                path == '/reset')) {
+        if (request.method == 'POST' && path == '/care_events') {
+          final requestBody =
+              jsonDecode(await utf8.decoder.bind(request).join())
+                  as Map<String, dynamic>;
+          final eventType = requestBody['event_type'] as String;
+          final timestamp = DateTime.parse(requestBody['timestamp'] as String);
+
+          // Mirrors pi/sync_api.py's dedup rule (see PI_CONTRACT.md's
+          // "Duplicate handling"): same type within _dedupWindow of an
+          // existing entry is a likely duplicate, not a real new event.
+          final isDuplicate = _careEvents.any((e) =>
+              e['event_type'] == eventType &&
+              DateTime.parse(e['timestamp'] as String)
+                  .difference(timestamp)
+                  .abs() <=
+                  _dedupWindow);
+
+          if (!isDuplicate) {
+            _careEvents.add({
+              'id': 'live-care-${_careEvents.length}',
+              'event_type': eventType,
+              'timestamp': timestamp.toIso8601String(),
+              'source': 'app',
+              'device_id': requestBody['device_id'],
+              'note': requestBody['note'],
+            });
+          }
+
+          request.response
+            ..statusCode = 200
+            ..headers.contentType = ContentType.json
+            ..write(jsonEncode(
+                {'status': isDuplicate ? 'skipped_duplicate' : 'created'}));
+          await request.response.close();
+          return;
+        }
+        if (request.method == 'POST' && path == '/prediction_state') {
+          final requestBody =
+              jsonDecode(await utf8.decoder.bind(request).join())
+                  as Map<String, dynamic>;
+          _predictionPaused = requestBody['paused'] as bool;
+          request.response
+            ..statusCode = 200
+            ..headers.contentType = ContentType.json
+            ..write(jsonEncode({'status': 'ok'}));
+          await request.response.close();
+          return;
+        }
+        if (request.method == 'POST' && path == '/detection_settings') {
+          final requestBody =
+              jsonDecode(await utf8.decoder.bind(request).join())
+                  as Map<String, dynamic>;
+
+          if (requestBody['reset'] == true) {
+            _detectionSettings =
+                Map<String, dynamic>.from(_defaultDetectionSettings);
+          } else {
+            final error = _validateDetectionSettings(requestBody);
+            if (error != null) {
+              request.response
+                ..statusCode = 400
+                ..headers.contentType = ContentType.json
+                ..write(jsonEncode({'error': error}));
+              await request.response.close();
+              return;
+            }
+            _detectionSettings = {..._detectionSettings, ...requestBody};
+          }
+
+          request.response
+            ..statusCode = 200
+            ..headers.contentType = ContentType.json
+            ..write(jsonEncode(_detectionSettings));
+          await request.response.close();
+          return;
+        }
+        if (request.method == 'POST' && path == '/reset') {
           // Not actually persisted -- see class doc. Good enough to let
           // the UI's success/failure paths run without erroring.
+          request.response
+            ..statusCode = 200
+            ..headers.contentType = ContentType.json
+            ..write(jsonEncode({'status': 'ok'}));
+          await request.response.close();
+          return;
+        }
+        if (request.method == 'DELETE' && path.startsWith('/care_events/')) {
+          // Not actually persisted, same as the POST stubs above -- lets
+          // raw_log_screen.dart's delete-entry flow be exercised without a
+          // real Pi.
           request.response
             ..statusCode = 200
             ..headers.contentType = ContentType.json
@@ -216,6 +334,26 @@ class FakePiServer {
       ..headers.contentType = ContentType.json
       ..write(jsonEncode(body));
     await request.response.close();
+  }
+
+  /// Real bounds live Pi-side; this just approximates them (0-1
+  /// confidence, positive window counts) well enough to exercise the
+  /// app's 400/DetectionSettingsException handling without a real Pi.
+  String? _validateDetectionSettings(Map<String, dynamic> body) {
+    final threshold = body['stage1_confidence_threshold'];
+    if (threshold != null &&
+        (threshold is! num || threshold < 0 || threshold > 1)) {
+      return 'stage1_confidence_threshold must be between 0 and 1';
+    }
+    final startWindows = body['session_start_min_windows'];
+    if (startWindows != null && (startWindows is! int || startWindows < 1)) {
+      return 'session_start_min_windows must be a positive integer';
+    }
+    final endWindows = body['session_end_missed_windows'];
+    if (endWindows != null && (endWindows is! int || endWindows < 1)) {
+      return 'session_end_missed_windows must be a positive integer';
+    }
+    return null;
   }
 
   List<Map<String, dynamic>> _filterSince(
