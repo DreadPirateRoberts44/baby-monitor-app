@@ -76,6 +76,25 @@ flutter build apk --release
 See the root [README.md](../README.md)'s "Getting started" section
 and `android/key.properties.example` for release signing.
 
+**Keep `flutter run` running rather than restarting it per change** —
+a full build/install (what you pay for every fresh `flutter run`) takes
+minutes; the hot reload/restart it gives you afterward does not:
+- **`r`** (hot reload) — sub-second, keeps app state. Covers almost
+  everything: UI, widget, and most logic changes.
+- **`R`** (hot restart) — a few seconds, resets state but skips
+  Gradle/install entirely. Use when a reload doesn't pick up a change
+  (changed `const`s, top-level/static state, `main()`).
+
+A fresh `flutter run` is only actually required after
+`pubspec.yaml`/native (`android/`) changes or `flutter clean`.
+`android/gradle.properties` has `org.gradle.parallel` and
+`org.gradle.caching` enabled to keep those unavoidable rebuilds as
+quick as possible. The emulator is also meaningfully faster to iterate
+against than a physical device (no USB/WiFi install step) — do the
+bulk of testing there and reserve physical-device runs for final
+verification (e.g. confirming a sound actually plays through real
+speakers).
+
 ## Testing without a real Pi
 
 Most of this app is a thin client over a Raspberry Pi's MQTT broker
@@ -118,6 +137,37 @@ a "Developer" section at the bottom of the Settings screen:
 This section is compiled out of release builds via `kDebugMode` — it's
 not just hidden, the code path doesn't exist in a `flutter build apk
 --release` binary.
+
+## Installing the release APK on a family member's phone
+
+This app is sideloaded, not distributed via Play Store (see root
+[README.md](../README.md)'s "Platform plan"), so getting it onto
+someone else's phone is a manual file transfer, not a store install:
+
+1. Build it: `flutter build apk --release`. The output APK lands at
+   `build/app/outputs/flutter-apk/app-release.apk`. If
+   `android/key.properties` isn't set up yet (see
+   `android/key.properties.example`), this still succeeds but signs
+   with the debug key — fine for your own testing, but re-sign with a
+   real key before treating it as the install you'll keep updating.
+2. Get the APK onto the phone — any of these work: email it to
+   yourself, upload to Drive/Dropbox and download on the phone, or
+   `adb install build/app/outputs/flutter-apk/app-release.apk` with the
+   phone connected via USB and USB debugging enabled.
+3. On the phone, opening the downloaded APK will prompt to allow
+   installs from that source (Chrome, Files, whichever app opened it)
+   if it hasn't been allowed before — this is Android's "Install
+   unknown apps" permission, per-source, found under Settings if you
+   need to grant it ahead of time.
+4. Install, then open Settings in the app and enter the Pi's LAN IP —
+   see "Testing against a real Pi" below for what should happen next.
+
+**Updating an existing install**: rebuild and reinstall the same way —
+Android allows the overwrite as long as it's signed with the same key
+every time. Signing with a *different* key than a previous install
+requires uninstalling first (and losing local data: care-event queue,
+device ID), which is the entire reason `key.properties.example` warns
+to keep the `.jks` file somewhere durable rather than regenerating it.
 
 ## Testing against a real Pi
 
